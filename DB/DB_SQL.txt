@@ -1,0 +1,46 @@
+-- User info for authentication
+CREATE TABLE user (
+  user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_name TEXT NOT NULL,
+  user_email TEXT UNIQUE NOT NULL,
+  user_password TEXT NOT NULL
+);
+
+-- Defines who cares for whom
+CREATE TABLE connection (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  cared_id UUID NOT NULL REFERENCES user(user_id) ON DELETE CASCADE,
+  carer_id UUID NOT NULL REFERENCES user(user_id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (cared_id, carer_id),
+  CONSTRAINT no_self_connection CHECK (cared_id <> carer_id)
+);
+
+-- Represents a physical IoT button registered to a user
+CREATE TABLE sos_device (
+  device_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id UUID NOT NULL REFERENCES user(user_id) ON DELETE CASCADE,
+  is_online BOOLEAN DEFAULT TRUE,
+  last_triggered_at TIMESTAMPTZ
+);
+
+-- Represents each SOS press/activation from a device.
+CREATE TABLE sos_event (
+  event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES sos_device(device_id) ON DELETE CASCADE,
+  triggered_by UUID NOT NULL REFERENCES user(user_id) ON DELETE CASCADE,
+  on_at TIMESTAMPTZ DEFAULT NOW(),
+  off_at TIMESTAMPTZ,
+  handled BOOLEAN DEFAULT FALSE
+);
+
+
+-- Stores which carers were notified for which SOS event.
+CREATE TABLE notification (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id UUID NOT NULL REFERENCES sos_event(event_id) ON DELETE CASCADE,
+  carer_id UUID NOT NULL REFERENCES user(user_id) ON DELETE CASCADE,
+  sent_at TIMESTAMPTZ DEFAULT NOW(),
+  seen_at TIMESTAMPTZ,
+  UNIQUE (event_id, carer_id)
+);
