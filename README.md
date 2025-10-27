@@ -11,7 +11,7 @@ The system combines:
 - **Embedded hardware (ESP32/ESP8266)** for data capture and Wi-Fi communication.  
 - **Flask REST API** for authentication, device registration, and event handling.  
 - **Supabase PostgreSQL database** for persistent storage of users, devices, and health data.  
-- **Web-app frontend** for caregivers and users to view alerts, history, and system status in real time.
+- **Frontend** for caregivers and users to view alerts, history, and system status in real time.
 
 The architecture enables autonomous local detection with cloud-level management and communication between devices and caregivers.
 
