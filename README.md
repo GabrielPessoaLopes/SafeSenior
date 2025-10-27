@@ -44,7 +44,7 @@ Data Capture / Wi-Fi Auth & Logic Persistent Storage User & Caregiver UI
 | Database | Supabase (PostgreSQL) |
 | Authentication | JWT |
 | IoT Device | Arduino (ESP32/ESP8266) |
-| Frontend | Web App (JavaScript) |
+| Frontend | |
 | Hosting | Vercel |
 | Communication | HTTP (JSON over Wi-Fi) |
 
