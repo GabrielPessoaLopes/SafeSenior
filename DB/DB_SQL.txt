@@ -1,46 +1,64 @@
--- User info for authentication
-CREATE TABLE user (
+-- =========================================
+-- CLEANUP (Drop existing tables safely)
+-- =========================================
+DROP TABLE IF EXISTS notification CASCADE;
+DROP TABLE IF EXISTS sos_event CASCADE;
+DROP TABLE IF EXISTS sos_device CASCADE;
+DROP TABLE IF EXISTS connection CASCADE;
+DROP TABLE IF EXISTS "user" CASCADE;
+
+-- =========================================
+-- USER TABLE
+-- =========================================
+CREATE TABLE "user" (
   user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_name TEXT NOT NULL,
   user_email TEXT UNIQUE NOT NULL,
   user_password TEXT NOT NULL
 );
 
--- Defines who cares for whom
+-- =========================================
+-- CONNECTION TABLE (mutual user-to-user connection)
+-- =========================================
 CREATE TABLE connection (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  cared_id UUID NOT NULL REFERENCES user(user_id) ON DELETE CASCADE,
-  carer_id UUID NOT NULL REFERENCES user(user_id) ON DELETE CASCADE,
+  connection_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user1_id UUID NOT NULL REFERENCES "user"(user_id) ON DELETE CASCADE,
+  user2_id UUID NOT NULL REFERENCES "user"(user_id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE (cared_id, carer_id),
-  CONSTRAINT no_self_connection CHECK (cared_id <> carer_id)
+  UNIQUE (user1_id, user2_id),
+  CONSTRAINT no_self_connection CHECK (user1_id <> user2_id)
 );
 
--- Represents a physical IoT button registered to a user
+-- =========================================
+-- SOS DEVICE TABLE
+-- =========================================
 CREATE TABLE sos_device (
   device_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  owner_id UUID NOT NULL REFERENCES user(user_id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES "user"(user_id) ON DELETE CASCADE,
   is_online BOOLEAN DEFAULT TRUE,
   last_triggered_at TIMESTAMPTZ
 );
 
--- Represents each SOS press/activation from a device.
+-- =========================================
+-- SOS EVENT TABLE
+-- =========================================
 CREATE TABLE sos_event (
   event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   device_id UUID NOT NULL REFERENCES sos_device(device_id) ON DELETE CASCADE,
-  triggered_by UUID NOT NULL REFERENCES user(user_id) ON DELETE CASCADE,
+  triggered_by UUID NOT NULL REFERENCES "user"(user_id) ON DELETE CASCADE,
   on_at TIMESTAMPTZ DEFAULT NOW(),
   off_at TIMESTAMPTZ,
   handled BOOLEAN DEFAULT FALSE
 );
 
-
--- Stores which carers were notified for which SOS event.
+-- =========================================
+-- NOTIFICATION TABLE
+-- =========================================
 CREATE TABLE notification (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   event_id UUID NOT NULL REFERENCES sos_event(event_id) ON DELETE CASCADE,
-  carer_id UUID NOT NULL REFERENCES user(user_id) ON DELETE CASCADE,
+  notified_user UUID NOT NULL REFERENCES "user"(user_id) ON DELETE CASCADE,
   sent_at TIMESTAMPTZ DEFAULT NOW(),
   seen_at TIMESTAMPTZ,
-  UNIQUE (event_id, carer_id)
+  UNIQUE (event_id, notified_user)
 );

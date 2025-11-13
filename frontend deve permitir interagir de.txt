@@ -1,0 +1,1 @@
+frontend deve permitir interagir de volta (cuidador -> cuidado)
