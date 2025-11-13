@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="gabriellopes.safesenior.app.safeseniorapp">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:allowBackup="true"
+        android:label="SafeSenior"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
+
+        <!-- Launcher activity -->
+        <activity
+            android:name=".activities.LoginActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Register screen -->
+        <activity android:name=".activities.RegisterActivity" android:exported="false" />
+        <!-- Main dashboard -->
+        <activity android:name=".activities.MainActivity" android:exported="false" />
+        <!-- SOS History -->
+        <activity android:name=".activities.UserEventsActivity" android:exported="false" />
+
+    </application>
+
+</manifest>
