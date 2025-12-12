@@ -42,8 +42,12 @@ public class LoginActivity extends AppCompatActivity {
         prefHelper = new SharedPrefHelper(this);
         api = ApiClient.getClient().create(ApiInterface.class);
 
+        // Login action
         loginButton.setOnClickListener(v -> login());
-        registerLink.setOnClickListener(v -> startActivity(new Intent(this, RegisterActivity.class)));
+        // Navigate to Register screen
+        registerLink.setOnClickListener(v ->
+                startActivity(new Intent(this, RegisterActivity.class))
+        );
     }
 
     private void login() {
@@ -55,11 +59,14 @@ public class LoginActivity extends AppCompatActivity {
             return;
         }
 
+        // Perform login request
         api.login(new LoginRequest(email, password)).enqueue(new Callback<LoginResponse>() {
             @Override
             public void onResponse(Call<LoginResponse> call, Response<LoginResponse> response) {
                 if (response.isSuccessful() && response.body() != null) {
+                    // Save token and userId locally
                     prefHelper.saveAuth(response.body().token, response.body().userId);
+
                     startActivity(new Intent(LoginActivity.this, MainActivity.class));
                     finish();
                 } else {

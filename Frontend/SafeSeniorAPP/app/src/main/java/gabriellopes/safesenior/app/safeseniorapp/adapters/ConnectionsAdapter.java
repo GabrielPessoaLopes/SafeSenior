@@ -7,6 +7,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
@@ -19,32 +20,26 @@ import gabriellopes.safesenior.app.safeseniorapp.models.Connection;
 
 public class ConnectionsAdapter extends RecyclerView.Adapter<ConnectionsAdapter.ViewHolder> {
 
-    // -------------------------------------------------------------------------
-    // INTERFACE
-    // -------------------------------------------------------------------------
+    // Handle UI actions from each row (item click + respond button)
     public interface OnConnectionClickListener {
         void onConnectionClick(Connection connection);
         void onSendMessageClick(Connection connection);
     }
 
-    // -------------------------------------------------------------------------
-    // FIELDS
-    // -------------------------------------------------------------------------
+    // List of all connections displayed in the RecyclerView
     private final List<Connection> connections;
+    // Handle actions when the user clicks anything
     private final OnConnectionClickListener listener;
+    // Stores the emails of users who currently have an active SOS
     private final List<String> activeSosEmails = new ArrayList<>();
 
-    // -------------------------------------------------------------------------
-    // CONSTRUCTOR
-    // -------------------------------------------------------------------------
+    // Receives connection list
     public ConnectionsAdapter(List<Connection> connections, OnConnectionClickListener listener) {
         this.connections = connections;
         this.listener = listener;
     }
 
-    // -------------------------------------------------------------------------
-    // VIEW HOLDER
-    // -------------------------------------------------------------------------
+    // Holds references to each row's UI components
     public static class ViewHolder extends RecyclerView.ViewHolder {
         TextView name, email, lastSos;
         android.widget.Button btnMessage;
@@ -58,9 +53,7 @@ public class ConnectionsAdapter extends RecyclerView.Adapter<ConnectionsAdapter.
         }
     }
 
-    // -------------------------------------------------------------------------
-    // ADAPTER METHODS
-    // -------------------------------------------------------------------------
+    // Create a new inflated row layout
     @NonNull
     @Override
     public ConnectionsAdapter.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
@@ -69,14 +62,16 @@ public class ConnectionsAdapter extends RecyclerView.Adapter<ConnectionsAdapter.
         return new ViewHolder(view);
     }
 
+    // Bind connection info + SOS UI state to a row
     @Override
     public void onBindViewHolder(@NonNull ConnectionsAdapter.ViewHolder holder, int position) {
         Connection connection = connections.get(position);
 
+        // Basic info
         holder.name.setText(connection.user_name);
         holder.email.setText(connection.user_email);
 
-        // Default text
+        // Format last SOS timestamp if available
         if (connection.last_sos != null && !connection.last_sos.equals("-")) {
             try {
                 java.time.ZonedDateTime zdt = java.time.ZonedDateTime.parse(connection.last_sos);
@@ -90,8 +85,7 @@ public class ConnectionsAdapter extends RecyclerView.Adapter<ConnectionsAdapter.
         } else {
             holder.lastSos.setText("Last SOS: -");
         }
-
-
+        // Check if current connection has an active SOS
         boolean isActiveSOS = activeSosEmails.contains(connection.user_email);
 
         // Cancel any previous animator tied to this holder
@@ -107,18 +101,34 @@ public class ConnectionsAdapter extends RecyclerView.Adapter<ConnectionsAdapter.
             holder.lastSos.setTextColor(Color.RED);
             holder.btnMessage.setVisibility(View.VISIBLE);
 
+            // Blink the entire row
             ObjectAnimator animator = ObjectAnimator.ofFloat(holder.itemView, "alpha", 1f, 0.3f);
             animator.setDuration(600);
             animator.setRepeatMode(ValueAnimator.REVERSE);
             animator.setRepeatCount(ValueAnimator.INFINITE);
             animator.start();
-
-            // Store animator reference so we can cancel it later
             holder.itemView.setTag(animator);
 
-            holder.btnMessage.setOnClickListener(v -> listener.onSendMessageClick(connection));
+            // Button shows state based on user "on the way" flag
+            if (connection.isOnTheWay())
+                holder.btnMessage.setText("Cancel");
+            else
+                holder.btnMessage.setText("Respond");
+
+            holder.btnMessage.setOnClickListener(v -> {
+                // Toggle "respond" button state
+                connection.setOnTheWay(!connection.isOnTheWay());
+                // Update UI to match state
+                if (connection.isOnTheWay()) {
+                    holder.btnMessage.setText("Cancel");
+                }else {
+                    holder.btnMessage.setText("Respond");
+                }
+                listener.onSendMessageClick(connection);
+            });
         } else {
             // Reset to default appearance
+            connection.setOnTheWay(false);
             holder.itemView.setBackgroundColor(Color.WHITE);
             holder.lastSos.setTextColor(Color.BLACK);
             holder.btnMessage.setVisibility(View.GONE);
@@ -126,18 +136,17 @@ public class ConnectionsAdapter extends RecyclerView.Adapter<ConnectionsAdapter.
             holder.itemView.setTag(null);
         }
 
+        // Clicking the row opens event history
         holder.itemView.setOnClickListener(v -> listener.onConnectionClick(connection));
     }
 
-
+    // How many rows to show
     @Override
     public int getItemCount() {
         return connections != null ? connections.size() : 0;
     }
 
-    // -------------------------------------------------------------------------
-    // SOS STATE UPDATER
-    // -------------------------------------------------------------------------
+    // Replace active SOS list and refresh UI
     public void setActiveSOSUsers(List<Connection> activeUsers) {
         activeSosEmails.clear();
         if (activeUsers != null) {
@@ -150,6 +159,7 @@ public class ConnectionsAdapter extends RecyclerView.Adapter<ConnectionsAdapter.
         notifyDataSetChanged();
     }
 
+    // Mark one user as active SOS (triggered by notification)
     public void highlightUserByEmail(String email) {
         if (email == null) return;
         if (!activeSosEmails.contains(email)) {

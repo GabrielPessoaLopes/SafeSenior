@@ -11,4 +11,14 @@ public class Connection {
 
     @SerializedName("last_sos")
     public String last_sos;
+
+    @SerializedName("device_id")
+    public String device_id;
+
+    private boolean onTheWay = false;
+
+    public boolean isOnTheWay() { return onTheWay; }
+    public void setOnTheWay(boolean value) { this.onTheWay = value; }
+
+
 }

@@ -7,31 +7,23 @@ from dotenv import load_dotenv
 import os
 import hashlib
 
-
-load_dotenv()  # loads variables from .env into environment
-
-
-#The SQL query is automatically built and executed by Supabase based on:
-#The GET request made to the Supabase REST endpoint
-#The query parameters (params) sent
-#The headers (Prefer) like sorting
-#Supabase handles authentication, builds the SQL query behind the scenes, 
-# executes it on its PostgreSQL database, 
-# and returns the filtered and sorted result as JSON.
+ # load variables from .env into environment
+load_dotenv() 
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get("SECRET_KEY", "default_secret_key")
 
-# Key
+# Supabase handles SQL execution automatically from REST queries
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-# Common Supabase table URLs
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
+
+# Base REST paths
 SUPABASE_REST_URL = f"{SUPABASE_URL}/rest/v1"
 USER_URL = f"{SUPABASE_REST_URL}/user"
 CONNECTION_URL = f"{SUPABASE_REST_URL}/connection"
 DEVICE_URL = f"{SUPABASE_REST_URL}/sos_device"
 EVENT_URL = f"{SUPABASE_REST_URL}/sos_event"
+HELP_URL = f"{SUPABASE_REST_URL}/help_event"
 NOTIF_URL = f"{SUPABASE_REST_URL}/notification"
 
 # HTTP Status Codes
@@ -58,30 +50,76 @@ def home():
     return jsonify({"message": "Welcome to the QuickFix API!"})
 
 #|---------------------------------------------------------------------------------------------------|
-#|                                      USER ENDPOINTS                                               |                               
+#|                                      AUTH DECORATORS                                              |                               
 #|---------------------------------------------------------------------------------------------------|
-
-# ================================== AUTH DECORATOR ================================== 
+# ================================== USER ================================== 
 def auth_user(f):
-    """ Decorator to authenticate requests using JWT. 
-        Adds request.user_id if valid."""
     @wraps(f)
     def decorated(*args, **kwargs):
-        token = request.headers.get("Authorization")
-        if not token:
+        auth = request.headers.get("Authorization")
+        if not auth:
             return jsonify({"message": "Token is missing"}), UNAUTHORIZED
+
+        token = auth
+
         try:
             data = jwt.decode(token, app.config["SECRET_KEY"], algorithms=["HS256"])
-            request.user_id = data["id"]
-        except:
+        except Exception:
             return jsonify({"message": "Invalid token"}), UNAUTHORIZED
+
+        # User token
+        if "id" in data:
+            request.user_id = data["id"]
+            return f(*args, **kwargs)
+
+        # Device token
+        if "device_id" in data:
+            dev_id = data["device_id"]
+            res = requests.get(f"{DEVICE_URL}?device_id=eq.{dev_id}", headers=supabase_headers())
+            dev_data = res.json()
+
+            if not dev_data:
+                return jsonify({"message": "Device not registered"}), UNAUTHORIZED
+
+            request.user_id = dev_data[0]["owner_id"]
+            return f(*args, **kwargs)
+
+        return jsonify({"message": "Invalid token"}), UNAUTHORIZED
+    return decorated
+
+
+# ================================== SOS DEVICE ================================== 
+def auth_device(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        content = request.get_json() or {}
+
+        device_id = content.get("device_id")
+        if not device_id:
+            return jsonify({"message": "Missing device_id"}), BAD_REQUEST
+
+        # Check device in Supabase
+        res = requests.get(f"{DEVICE_URL}?device_id=eq.{device_id}", headers=supabase_headers())
+        data = res.json()
+
+        if not data:
+            return jsonify({"message": "Device not registered"}), NOT_FOUND
+
+        # Attach owner_id so the endpoint knows who triggered it
+        request.device_id = device_id
+        request.user_id = data[0]["owner_id"]
+
         return f(*args, **kwargs)
     return decorated
 
+#|---------------------------------------------------------------------------------------------------|
+#|                                      USER ENDPOINTS                                               |                               
+#|---------------------------------------------------------------------------------------------------|
 # ================================== REGISTER =====================================
 @app.route("/register", methods=["POST"])
 def register_user():
     """Register new user"""
+
     content = request.get_json()
     required = ["user_name", "user_email", "user_password"]
     if not all(k in content for k in required):
@@ -110,7 +148,8 @@ def register_user():
 # ================================== LOGIN =========================================
 @app.route("/login", methods=["POST"])
 def login_user():
-    """Login with email and password"""
+    """Login a user"""
+
     content = request.get_json()
     if "user_email" not in content or "user_password" not in content:
             return jsonify({"message": "Missing credentials"}), BAD_REQUEST
@@ -136,7 +175,8 @@ def login_user():
 @app.route("/user/me", methods=["GET"])
 @auth_user
 def get_profile():
-    """Get the authenticated user's profile"""
+    """Get the authenticated user's profile info"""
+
     res = requests.get(f"{USER_URL}?user_id=eq.{request.user_id}", headers=supabase_headers())
     data = res.json()
     if not data:
@@ -150,7 +190,8 @@ def get_profile():
 @app.route("/connections", methods=["POST"])
 @auth_user
 def add_connection():
-    """Create a symmetric connection between two users"""
+    """Create a two ended connection between two users"""
+
     content = request.get_json()
     if "other_user_id" not in content:
         return jsonify({"message": "Missing other_user_id"}), BAD_REQUEST
@@ -174,7 +215,8 @@ def add_connection():
 @app.route("/connections", methods=["GET"])
 @auth_user
 def list_connections():
-    """List all the users connection between other users"""
+    """List all the users connections"""
+
     # Get all connection rows for this user
     url = f"{CONNECTION_URL}?or=(user1_id.eq.{request.user_id},user2_id.eq.{request.user_id})"
     res = requests.get(url, headers=supabase_headers())
@@ -188,6 +230,11 @@ def list_connections():
     enriched = []
     for c in connections:
         other_id = c["user2_id"] if c["user1_id"] == request.user_id else c["user1_id"]
+
+        # Get device id
+        dev_res = requests.get(f"{DEVICE_URL}?owner_id=eq.{other_id}", headers=supabase_headers())
+        dev_data = dev_res.json()
+        device_id = dev_data[0]["device_id"] if dev_data else None
 
         # Get user info
         u_res = requests.get(f"{USER_URL}?user_id=eq.{other_id}", headers=supabase_headers())
@@ -206,11 +253,11 @@ def list_connections():
             last_sos = e.get("on_at") or "-"
 
         enriched.append({
+            "device_id": device_id,
             "other_user_name": u.get("user_name"),
             "other_user_email": u.get("user_email"),
             "last_sos": last_sos
         })
-
     return jsonify(enriched), OK
 
 
@@ -221,7 +268,8 @@ def list_connections():
 @app.route("/devices", methods=["POST"])
 @auth_user
 def register_device():
-    """Register a new SOS device and returns its ID"""
+    """Register a new SOS device and set up its ID"""
+
     device_id = str(uuid.uuid4())
     data = {
         "device_id": device_id,
@@ -244,20 +292,21 @@ def register_device():
 # ================================== DEVICE LOGIN ==================================
 @app.route("/devices/login", methods=["POST"])
 def device_login():
-    """Issue a short-lived JWT for a registered device."""
+    """Return a temporary JWT for a registered device"""
+
     content = request.get_json()
     if "device_id" not in content:
         return jsonify({"message": "Missing device_id"}), BAD_REQUEST
 
     device_id = content["device_id"]
 
-    # Verify that the device exists
+    # Check if device exists
     res = requests.get(f"{DEVICE_URL}?device_id=eq.{device_id}", headers=supabase_headers())
     data = res.json()
     if not data:
         return jsonify({"message": "Device not found"}), NOT_FOUND
 
-    # Create device token
+    # Generate token
     token = jwt.encode(
         {"device_id": device_id, "exp": datetime.now(timezone.utc) + timedelta(hours=8)},
         app.config["SECRET_KEY"], algorithm="HS256"
@@ -269,6 +318,7 @@ def device_login():
 @auth_user
 def remove_device(device_id):
     """Remove a registered device"""
+
     res = requests.delete(f"{DEVICE_URL}?device_id=eq.{device_id}", headers=supabase_headers())
     return jsonify({"message": "Device removed"}), OK
 
@@ -276,13 +326,68 @@ def remove_device(device_id):
 @app.route("/devices/<uuid:device_id>", methods=["GET"])
 @auth_user
 def get_device(device_id):
-    """Return single device info"""
+    """Return device info"""
+
     res = requests.get(f"{DEVICE_URL}?device_id=eq.{device_id}", headers=supabase_headers())
     data = res.json()
     if not data:
         return jsonify({"message": "Device not found"}), NOT_FOUND
     return jsonify(data[0]), OK
 
+# ================================== GET DEVICE ONLINE ==================================
+@app.route("/device/online", methods=["POST"])
+def device_online():
+
+    content = request.get_json() or {}
+    device_id = content.get("device_id")
+    if not device_id:
+        return jsonify({"message": "Missing device_id"}), BAD_REQUEST
+
+    # Validate device
+    res = requests.get(f"{DEVICE_URL}?device_id=eq.{device_id}", headers=supabase_headers())
+    data = res.json()
+    if not data:
+        return jsonify({"message": "Device not registered"}), NOT_FOUND
+
+    # UPDATE DEVICE (YOU REMOVED THIS!)
+    update = {
+        "is_online": True,
+        "last_seen_at": datetime.now(timezone.utc).isoformat()
+    }
+    requests.patch(
+        f"{DEVICE_URL}?device_id=eq.{device_id}",
+        headers=supabase_headers(),
+        json=update
+    )
+
+    # Close any active help events
+    requests.patch(
+        f"{HELP_URL}?device_id=eq.{device_id}&active=eq.true",
+        headers=supabase_headers(),
+        json={"active": False, "help_off_at": datetime.now(timezone.utc).isoformat()}
+    )
+
+    return jsonify({"message": "Device online"}), OK
+
+
+# ================================== GET DEVICE OFFLINE ==================================
+@app.route("/device/offline", methods=["POST"])
+def device_offline():
+    """Mark a device as offline."""
+
+    content = request.get_json() or {}
+    device_id = content.get("device_id")
+    if not device_id:
+        return jsonify({"message": "Missing device_id"}), BAD_REQUEST
+
+    # Update offline state
+    update = {"is_online": False}
+    requests.patch(
+        f"{DEVICE_URL}?device_id=eq.{device_id}",
+        headers=supabase_headers(),
+        json=update
+    )
+    return jsonify({"message": "Device offline"}), OK
 
 # ================================== LIST ==================================
 @app.route("/devices", methods=["GET"])
@@ -297,137 +402,142 @@ def list_devices():
 #|---------------------------------------------------------------------------------------------------|
 # ================================== TOGGLE SOS EVENT ==================================
 @app.route("/sos", methods=["POST"])
-@auth_user
 def toggle_sos():
-    """Toggle the user's SOS state: start if inactive, stop if active."""
+    """Toggle SOS state from app or device."""
+
+    # Determine source (frontend (JWT) or device (device_id))
+    auth_header = request.headers.get("Authorization")
+
+    # If header (token) exists, then frontend
+    if auth_header:
+        # SOS triggered from frontend
+        result = auth_user(lambda: None)()
+        if result:
+            return result
+        user_id = request.user_id
+        device_id = None
+    # SOS alert comes from a device
+    else:
+        # SOS triggered from device
+        result = auth_device(lambda: None)()
+        if result:
+            return result
+        user_id = request.user_id
+        device_id = request.device_id
 
     now = datetime.now(timezone.utc).isoformat()
 
-    # Check if there is an active SOS event for this user
-    active_url = f"{EVENT_URL}?triggered_by=eq.{request.user_id}&handled=eq.false"
+    # Check for active SOS events
+    active_url = f"{EVENT_URL}?triggered_by=eq.{user_id}&handled=eq.false"
     active_res = requests.get(active_url, headers=supabase_headers())
-
-    if active_res.status_code != OK:
-        return jsonify({"message": "Failed to check SOS state"}), SERVER_ERROR
-
     active_events = active_res.json()
 
-    # If active, stop it
+    # Stop SOS
     if active_events:
         active_event = active_events[0]
         event_id = active_event["event_id"]
 
         stop_data = {"off_at": now, "handled": True}
-        stop_res = requests.patch(f"{EVENT_URL}?event_id=eq.{event_id}",
-                                  headers=supabase_headers(), json=stop_data)
+        requests.patch(f"{EVENT_URL}?event_id=eq.{event_id}",
+                       headers=supabase_headers(), json=stop_data)
+        
+        # Disable help event automatically
+        requests.patch(
+            f"{HELP_URL}?device_id=eq.{device_id}&active=eq.true",
+            headers=supabase_headers(),
+            json={"active": False, "help_off_at": datetime.now(timezone.utc).isoformat()}
+        )
 
-        if stop_res.status_code not in (OK, CREATED):
-            return jsonify({"message": "Failed to stop SOS event"}), SERVER_ERROR
-
-        # Mark device as offline again
-        device_id = active_event.get("device_id")
+        # Device-specific cleanup
         if device_id:
-            device_update = {"is_online": False}
-            requests.patch(f"{DEVICE_URL}?device_id=eq.{device_id}",
-                           headers=supabase_headers(), json=device_update)
-            
-        # After stopping SOS, notify connected users
-        requests.post(f"{request.host_url}sos/notify_stop/{event_id}",
-                  headers={"Authorization": request.headers.get("Authorization")})    
+            requests.patch(
+                f"{DEVICE_URL}?device_id=eq.{device_id}",
+                headers=supabase_headers(),
+                json={"is_online": False}
+            )
 
-        return jsonify({
-            "message": "SOS stopped",
-            "event_id": event_id,
-            "active": False
-        }), OK
+        return jsonify({"message": "SOS stopped", "active": False}), OK
 
-    # Otherwise start a new SOS event
-    # Check or create device automatically
-    device_res = requests.get(f"{DEVICE_URL}?owner_id=eq.{request.user_id}", headers=supabase_headers())
-    device_data = device_res.json()
+    # Start SOS (frontend only)
+    if not device_id:
+        d_res = requests.get(f"{DEVICE_URL}?owner_id=eq.{user_id}", headers=supabase_headers())
+        d_data = d_res.json()
+        if d_data:
+            device_id = d_data[0]["device_id"]
+        else:
+            device_id = str(uuid.uuid4())
+            new_device = {
+                "device_id": device_id,
+                "owner_id": user_id,
+                "is_online": False,
+                "last_triggered_at": None
+            }
+            requests.post(DEVICE_URL, headers=supabase_headers(), json=new_device)
 
-    if device_res.status_code != OK:
-        return jsonify({"message": "Failed to check devices"}), SERVER_ERROR
-
-    if device_data:
-        device_id = device_data[0]["device_id"]
-    else:
-        device_id = str(uuid.uuid4())
-        new_device = {
-            "device_id": device_id,
-            "owner_id": request.user_id,
-            "is_online": False,
-            "last_triggered_at": None
-        }
-        create_res = requests.post(DEVICE_URL, headers=supabase_headers(), json=new_device)
-        if create_res.status_code not in (OK, CREATED):
-            return jsonify({"message": "Failed to auto-create device"}), SERVER_ERROR
-
-    # Create the new SOS event
+    # create event
     event = {
         "device_id": device_id,
-        "triggered_by": request.user_id,
+        "triggered_by": user_id,
         "on_at": now,
         "handled": False
     }
 
     res = requests.post(EVENT_URL, headers=supabase_headers(), json=event)
-    if res.status_code not in (OK, CREATED):
-        return jsonify({
-            "message": "Failed to create SOS event",
-            "details": res.text
-        }), SERVER_ERROR
-
     event_info = res.json()[0]
 
-    # Update device state
-    update = {"is_online": True, "last_triggered_at": now}
-    requests.patch(f"{DEVICE_URL}?device_id=eq.{device_id}",
-                   headers=supabase_headers(), json=update)
-    
-    # Send notifications to connected users
-    requests.post(f"{request.host_url}sos/notify/{event_info['event_id']}",
-              headers={"Authorization": request.headers.get("Authorization")})
-
+    # update device
+    requests.patch(
+        f"{DEVICE_URL}?device_id=eq.{device_id}",
+        headers=supabase_headers(),
+        json={"is_online": True, "last_triggered_at": now}
+    )
 
     return jsonify({
         "message": "SOS triggered",
+        "active": True,
         "event_id": event_info["event_id"],
-        "device_id": device_id,
-        "active": True
+        "device_id": device_id
     }), CREATED
 
 # ================================== LIST SOS EVENTS ==================================
 @app.route("/sos/events", methods=["GET"])
 @auth_user
 def list_sos_events():
-    """List SOS events filtered by user or device id (ordered by most recent)"""
-    triggered_by = request.args.get("triggered_by")
-    device_id = request.args.get("device_id")
+    """Return SOS events for a user by email."""
 
-    # Validate parameters
-    if not triggered_by and not device_id:
-        return jsonify({"message": "Missing triggered_by or device_id parameter"}), BAD_REQUEST
+    triggered_email = request.args.get("triggered_email")
 
-    # Build base URL
-    if triggered_by:
-        url = f"{EVENT_URL}?triggered_by=eq.{triggered_by}&order=on_at.desc"
-    else:
-        url = f"{EVENT_URL}?device_id=eq.{device_id}&order=on_at.desc"
+    if not triggered_email:
+        return jsonify({"message": "Missing triggered_email parameter"}), BAD_REQUEST
 
-    # Query Supabase REST
-    res = requests.get(url, headers=supabase_headers())
-    if res.status_code != OK:
+    # Get user by email
+    user_query = f"{USER_URL}?user_email=eq.{triggered_email}"
+    user_response = requests.get(user_query, headers=supabase_headers())
+    user_data = user_response.json()
+
+    if not user_data:
+        return jsonify([]), OK
+
+    user_id = user_data[0]["user_id"]
+
+    # Get user's SOS events
+    events_query = (
+        f"{EVENT_URL}?triggered_by=eq.{user_id}&order=on_at.desc"
+    )
+    events_response = requests.get(events_query, headers=supabase_headers())
+
+    if events_response.status_code != OK:
         return jsonify({"message": "Failed to retrieve events"}), SERVER_ERROR
 
-    data = res.json()
-    return jsonify(data if data else []), OK
-
+    events = events_response.json()
+    return jsonify(events if events else []), OK
+    
 # ================================== LIST ACTIVE SOS USERS ==================================
 @app.route("/sos/active", methods=["GET"])
 @auth_user
 def list_active_sos():
     """Return all users who currently have active SOS events."""
+
     res = requests.get(f"{EVENT_URL}?handled=is.false", headers=supabase_headers())
     if res.status_code != OK:
         return jsonify({"message": "Failed to fetch active SOS users"}), SERVER_ERROR
@@ -438,7 +548,7 @@ def list_active_sos():
 
     active_user_ids = [e["triggered_by"] for e in events]
 
-    # Retrieve names and emails for those users
+    # Get user details for each ID
     if not active_user_ids:
         return jsonify([]), OK
 
@@ -450,6 +560,115 @@ def list_active_sos():
 
     return jsonify(users_res.json()), OK
 
+
+#|---------------------------------------------------------------------------------------------------|
+#|                                     HELP TOGGLE ENDPOINTS                                         |
+#|---------------------------------------------------------------------------------------------------|
+# ================================== TOGGLE HELP SIGNAL ==================================
+@app.route("/help/toggle", methods=["POST"])
+@auth_user
+def toggle_help():
+    """Toggle help_event for a device and record caregiver email."""
+
+    content = request.get_json() or {}
+
+    device_id = content.get("device_id")
+    if not device_id:
+        return jsonify({"message": "Missing device_id"}), BAD_REQUEST
+
+    # caregiver email
+    user_res = requests.get(f"{USER_URL}?user_id=eq.{request.user_id}", headers=supabase_headers())
+    user_data = user_res.json()
+    caregiver_email = user_data[0]["user_email"] if user_data else None
+
+    # confirm device exists
+    dev_res = requests.get(f"{DEVICE_URL}?device_id=eq.{device_id}", headers=supabase_headers())
+    dev_data = dev_res.json()
+    if not dev_data:
+        return jsonify({"message": "Device not registered"}), NOT_FOUND
+
+    triggered_by = dev_data[0]["owner_id"]
+    now = datetime.now(timezone.utc).isoformat()
+
+    # check active help_event
+    active_url = f"{HELP_URL}?device_id=eq.{device_id}&active=eq.true"
+    res = requests.get(active_url, headers=supabase_headers())
+    active_events = res.json()
+
+    # close active help_event
+    if active_events:
+        help_id = active_events[0]["help_id"]
+
+        update = {
+            "help_off_at": now,
+            "active": False,
+            "handled_by": caregiver_email
+        }
+
+        requests.patch(f"{HELP_URL}?help_id=eq.{help_id}", headers=supabase_headers(), json=update)
+
+        # check active sos_event for this device
+        sos_active_res = requests.get(
+            f"{EVENT_URL}?device_id=eq.{device_id}&handled=eq.false",
+            headers=supabase_headers()
+        )
+        sos_active = sos_active_res.json()
+
+        # mark the sos_event as handled by this caregiver
+        if sos_active:
+            sos_id = sos_active[0]["event_id"]
+            requests.patch(
+                f"{EVENT_URL}?event_id=eq.{sos_id}",
+                headers=supabase_headers(),
+                json={"handled": True, "handled_by": caregiver_email}
+            )
+
+        
+        return jsonify({"help": False}), OK
+
+    # create new help_event
+    new_event = {
+        "device_id": device_id,
+        "triggered_by": triggered_by,
+        "help_on_at": now,
+        "active": True,
+        "handled_by": caregiver_email
+    }
+
+    created = requests.post(HELP_URL, headers=supabase_headers(), json=new_event).json()[0]
+
+    # check active sos_event to save who responded
+    sos_active_res = requests.get(
+        f"{EVENT_URL}?device_id=eq.{device_id}&handled=eq.false",
+        headers=supabase_headers()
+    )
+    sos_active = sos_active_res.json()
+
+    # add caregiver email to the sos_event
+    if sos_active:
+        sos_id = sos_active[0]["event_id"]
+        requests.patch(
+            f"{EVENT_URL}?event_id=eq.{sos_id}",
+            headers=supabase_headers(),
+            json={"handled_by": caregiver_email}
+        )
+
+    return jsonify({
+        "message": "Help on the way!",
+        "help": True,
+        "help_id": created["help_id"]
+    }), CREATED
+
+# ================================== GET HELP STATE ==================================
+@app.route("/help/state/<string:device_id>", methods=["GET"])
+def help_get_state(device_id):
+    """"Return help state for a device."""
+
+    active_url = f"{HELP_URL}?device_id=eq.{device_id}&active=eq.true"
+    res = requests.get(active_url, headers=supabase_headers())
+    events = res.json()
+
+    return jsonify({"help": bool(events)}), OK
 
 #|---------------------------------------------------------------------------------------------------|
 #|                                   NOTIFICATIONS ENDPOINTS                                         |                               |
@@ -467,6 +686,7 @@ def get_notifications():
 @auth_user
 def notify_sos_start(event_id):
     """Send notification to all connected users when SOS is triggered"""
+
     current_user = request.user_id
     now = datetime.now(timezone.utc).isoformat()
 
@@ -476,7 +696,7 @@ def notify_sos_start(event_id):
     trigger_name = user_info.get("user_name", "Unknown")
     trigger_email = user_info.get("user_email", "")
 
-    # Find connected users
+    # Get connected users
     con_res = requests.get(
         f"{CONNECTION_URL}?or=(user1_id.eq.{current_user},user2_id.eq.{current_user})",
         headers=supabase_headers()
@@ -505,17 +725,18 @@ def notify_sos_start(event_id):
 @app.route("/sos/notify_stop/<uuid:event_id>", methods=["POST"])
 @auth_user
 def notify_sos_stop(event_id):
-    """Mark notifications as seen/ended when SOS is stopped"""
+    """Mark notifications as seen when SOS is stopped"""
+
     now = datetime.now(timezone.utc).isoformat()
 
-    # Mark all notifications for this event as seen
+    # Update notification state
     patch_data = {"seen_at": now}
     res = requests.patch(f"{NOTIF_URL}?event_id=eq.{event_id}",
                          headers=supabase_headers(), json=patch_data)
 
     return jsonify({"message": "Stop notifications updated"}), OK
 
-
 # ================================== MAIN ==================================
 if __name__ == "__main__":
-    app.run(port=8080, debug=True)
+    #app.run(port=8080, debug=True)
+    app.run(host="0.0.0.0", port=8080, debug=True)

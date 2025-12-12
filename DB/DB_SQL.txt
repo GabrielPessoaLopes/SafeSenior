@@ -2,6 +2,7 @@
 -- CLEANUP (Drop existing tables safely)
 -- =========================================
 DROP TABLE IF EXISTS notification CASCADE;
+DROP TABLE IF EXISTS help_event CASCADE;
 DROP TABLE IF EXISTS sos_event CASCADE;
 DROP TABLE IF EXISTS sos_device CASCADE;
 DROP TABLE IF EXISTS connection CASCADE;
@@ -35,7 +36,7 @@ CREATE TABLE connection (
 CREATE TABLE sos_device (
   device_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   owner_id UUID NOT NULL REFERENCES "user"(user_id) ON DELETE CASCADE,
-  is_online BOOLEAN DEFAULT TRUE,
+  is_online BOOLEAN DEFAULT FALSE,
   last_triggered_at TIMESTAMPTZ
 );
 
@@ -46,9 +47,23 @@ CREATE TABLE sos_event (
   event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   device_id UUID NOT NULL REFERENCES sos_device(device_id) ON DELETE CASCADE,
   triggered_by UUID NOT NULL REFERENCES "user"(user_id) ON DELETE CASCADE,
-  on_at TIMESTAMPTZ DEFAULT NOW(),
+  on_at TIMESTAMPTZ,
   off_at TIMESTAMPTZ,
-  handled BOOLEAN DEFAULT FALSE
+  handled BOOLEAN DEFAULT FALSE,
+  handled_by TEXT   -- email of responder, NULL if not responded
+);
+
+-- =========================================
+-- HELP EVENT TABLE
+-- =========================================
+CREATE TABLE help_event (
+  help_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES sos_device(device_id) ON DELETE CASCADE,
+  triggered_by UUID NOT NULL REFERENCES "user"(user_id) ON DELETE CASCADE,
+  help_on_at TIMESTAMPTZ,
+  help_off_at TIMESTAMPTZ,
+  active BOOLEAN DEFAULT TRUE
+  handled_by TEXT
 );
 
 -- =========================================

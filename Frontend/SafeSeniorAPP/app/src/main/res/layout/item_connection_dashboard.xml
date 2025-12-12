@@ -52,7 +52,6 @@
         android:id="@+id/btnMessage"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Send Message"
         android:backgroundTint="@color/red"
         android:textColor="@android:color/white"
         android:visibility="gone"

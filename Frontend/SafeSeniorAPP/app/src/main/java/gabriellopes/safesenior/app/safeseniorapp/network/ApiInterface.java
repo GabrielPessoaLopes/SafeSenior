@@ -1,15 +1,14 @@
 package gabriellopes.safesenior.app.safeseniorapp.network;
+import com.google.gson.JsonObject;
+
 import java.util.List;
 
 import gabriellopes.safesenior.app.safeseniorapp.models.Connection;
-import gabriellopes.safesenior.app.safeseniorapp.models.Device;
 import gabriellopes.safesenior.app.safeseniorapp.models.Event;
 import gabriellopes.safesenior.app.safeseniorapp.models.LoginRequest;
 import gabriellopes.safesenior.app.safeseniorapp.models.LoginResponse;
 import gabriellopes.safesenior.app.safeseniorapp.models.Notification;
 import gabriellopes.safesenior.app.safeseniorapp.models.RegisterRequest;
-
-import gabriellopes.safesenior.app.safeseniorapp.models.SosStartRequest;
 import gabriellopes.safesenior.app.safeseniorapp.models.SosStartResponse;
 import okhttp3.ResponseBody;
 import retrofit2.Call;
@@ -33,10 +32,6 @@ public interface ApiInterface {
     @GET("connections")
     Call<List<Connection>> getConnections(@Header("Authorization") String token);
 
-    // Devices
-    @GET("devices")
-    Call<List<Device>> getDevices(@Header("Authorization") String token);
-
     // SOS
     @POST("sos")
     Call<SosStartResponse> toggleSos(@Header("Authorization") String token);
@@ -47,11 +42,18 @@ public interface ApiInterface {
     @POST("notifications/{eventId}")
     Call<Void> sendNotifications(@Header("Authorization") String token, @Path("eventId") String eventId);
 
-    @GET("sos_event")
+    @GET("/sos/events")
     Call<List<Event>> getEvents(
             @Header("Authorization") String token,
-            @Query("triggered_by") String triggeredBy
+            @Query("triggered_email") String email
     );
+
+    @POST("/help/toggle")
+    Call<Void> toggleHelp(
+            @Header("Authorization") String token,
+            @Body JsonObject body
+    );
+
 
     @GET("/notifications")
     Call<List<Notification>> getNotifications(@Header("Authorization") String token);

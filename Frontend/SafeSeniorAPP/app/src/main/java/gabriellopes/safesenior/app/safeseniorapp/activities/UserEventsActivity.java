@@ -2,11 +2,14 @@ package gabriellopes.safesenior.app.safeseniorapp.activities;
 
 import android.os.Bundle;
 import android.widget.Toast;
+
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.app.AppCompatDelegate;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+
 import java.util.List;
+
 import gabriellopes.safesenior.app.safeseniorapp.R;
 import gabriellopes.safesenior.app.safeseniorapp.adapters.EventsAdapter;
 import gabriellopes.safesenior.app.safeseniorapp.models.Event;
@@ -23,37 +26,43 @@ public class UserEventsActivity extends AppCompatActivity {
     private EventsAdapter adapter;
     private ApiInterface api;
     private SharedPrefHelper prefHelper;
-    private String caredUserId;
+    // Email of the user whose SOS history is being displayed
+    private String selectedUserEmail;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // Force light theme
+
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
         setContentView(R.layout.activity_user_events);
 
-        caredUserId = getIntent().getStringExtra("USER_ID");
+        // Email passed from dashboard
+        selectedUserEmail = getIntent().getStringExtra("email");
+
+        // List that will display the selected user's SOS events
         recyclerEvents = findViewById(R.id.recyclerEvents);
         recyclerEvents.setLayoutManager(new LinearLayoutManager(this));
 
+        // Helpers for reading auth token and calling the API
         prefHelper = new SharedPrefHelper(this);
         api = ApiClient.getClient().create(ApiInterface.class);
 
         loadEvents();
     }
 
+    // Load User SOS events
     private void loadEvents() {
         String token = prefHelper.getToken();
-        if (token == null || caredUserId == null) {
-            Toast.makeText(this, "Invalid session", Toast.LENGTH_SHORT).show();
-            finish();
+        if (token == null || selectedUserEmail == null) {
+            Toast.makeText(this, "Missing email", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        api.getEvents("Bearer " + token, caredUserId).enqueue(new Callback<List<Event>>() {
+        api.getEvents(token, selectedUserEmail).enqueue(new Callback<List<Event>>() {
             @Override
             public void onResponse(Call<List<Event>> call, Response<List<Event>> response) {
                 if (response.isSuccessful() && response.body() != null) {
+                    // Bind retrieved events to the RecyclerView
                     adapter = new EventsAdapter(response.body());
                     recyclerEvents.setAdapter(adapter);
                 } else {
